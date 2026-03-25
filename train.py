@@ -1,54 +1,45 @@
 import os
-from pathlib import Path
-from typing import Optional, Tuple
 
 import mlflow
 import mlflow.sklearn
 from sklearn.datasets import load_iris
-from sklearn.linear_model import LogisticRegression
+from sklearn.ensemble import RandomForestClassifier
 from sklearn.metrics import accuracy_score
 from sklearn.model_selection import train_test_split
 
 
-def train_and_evaluate() -> Tuple[LogisticRegression, float]:
-    data = load_iris()
+def main() -> None:
+    tracking_uri = os.getenv("MLFLOW_TRACKING_URI", "file:./mlruns")
+    mlflow.set_tracking_uri(tracking_uri)
+    mlflow.set_experiment("assignment5")
+
+    iris = load_iris()
     x_train, x_test, y_train, y_test = train_test_split(
-        data.data, data.target, test_size=0.25, random_state=42, stratify=data.target
+        iris.data, iris.target, test_size=0.2, random_state=42
     )
 
-    model = LogisticRegression(max_iter=300)
-    model.fit(x_train, y_train)
-    predictions = model.predict(x_test)
-    return model, float(accuracy_score(y_test, predictions))
+    clf = RandomForestClassifier(n_estimators=100, random_state=42)
+    clf.fit(x_train, y_train)
 
+    y_pred = clf.predict(x_test)
+    accuracy = float(accuracy_score(y_test, y_pred))
 
-def main() -> None:
-    tracking_uri = os.getenv("MLFLOW_TRACKING_URI")
-    if tracking_uri:
-        mlflow.set_tracking_uri(tracking_uri)
-
-    experiment_name = os.getenv("MLFLOW_EXPERIMENT_NAME", "Default")
-    mlflow.set_experiment(experiment_name)
-
-    override = os.getenv("MOCK_ACCURACY")
+    # Allow forcing pass/fail scenarios from workflow_dispatch.
+    mock_accuracy = os.getenv("MOCK_ACCURACY", "").strip()
+    if mock_accuracy:
+        accuracy = float(mock_accuracy)
 
     with mlflow.start_run() as run:
-        model: Optional[LogisticRegression] = None
-        if override is not None and override.strip() != "":
-            accuracy = float(override)
-            mlflow.log_param("accuracy_source", "override")
-        else:
-            model, accuracy = train_and_evaluate()
-            mlflow.log_param("accuracy_source", "model")
-
-        mlflow.log_param("model_name", "logreg_iris")
+        mlflow.log_param("n_estimators", 100)
         mlflow.log_metric("accuracy", accuracy)
-        if model is not None:
-            mlflow.sklearn.log_model(model, artifact_path="model")
+        mlflow.sklearn.log_model(clf, name="model")
 
-        Path("model_info.txt").write_text(run.info.run_id, encoding="utf-8")
+        print(f"Accuracy: {accuracy}")
         print(f"Run ID: {run.info.run_id}")
-        print(f"Logged accuracy: {accuracy:.4f}")
+        with open("model_info.txt", "w", encoding="utf-8") as f:
+            f.write(run.info.run_id)
+
+    print("model_info.txt saved successfully!")
 
 
 if __name__ == "__main__":

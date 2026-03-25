@@ -1,130 +1,84 @@
-name: Model Validation And Deploy
+name: ML Pipeline - Validate and Deploy
 
 on:
   push:
-    branches: ["main"]
+    branches: [ main ]
   workflow_dispatch:
     inputs:
       mock_accuracy:
-        description: "Optional override for accuracy (e.g., 0.80 for fail, 0.90 for pass)"
+        description: Optional accuracy override (e.g. 0.70 fail, 0.95 pass)
         required: false
         default: ""
-
-env:
-  ACCURACY_THRESHOLD: "0.85"
 
 jobs:
   validate:
     runs-on: ubuntu-latest
-    env:
-      MLFLOW_TRACKING_URI: file:./mlruns
 
     steps:
-      - name: Checkout repository
+      - name: Checkout Repository
         uses: actions/checkout@v4
 
-      - name: Set up Python
-        uses: actions/setup-python@v5
+      - name: Set up Python 3.10
+        uses: actions/setup-python@v4
         with:
-          python-version: "3.10"
+          python-version: '3.10'
 
-      - name: Install dependencies
+      - name: Install Dependencies
         run: |
           python -m pip install --upgrade pip
-          pip install mlflow dvc
-          if [ -f requirements.txt ]; then pip install -r requirements.txt; fi
+          pip install -r requirements.txt
 
-      - name: Pull dataset from DVC
-        run: dvc pull || echo "No DVC data/remote configured in this starter repo."
-
-      - name: Train model
-        env:
-          MOCK_ACCURACY: ${{ github.event.inputs.mock_accuracy || '0.70' }}
-        run: python train.py
-
-      - name: Export current MLflow Run ID
+      - name: Pull Data with DVC
         run: |
-          python - <<'PY'
-          import os
-          from pathlib import Path
-          import mlflow
+          dvc pull || echo "No DVC remote configured, skipping..."
 
-          info_file = Path("model_info.txt")
-          if info_file.exists() and info_file.read_text(encoding="utf-8").strip():
-              run_id = info_file.read_text(encoding="utf-8").strip()
-              print(f"Using run_id already written by train.py: {run_id}")
-              raise SystemExit(0)
+      - name: Train Model
+        env:
+          MLFLOW_TRACKING_URI: file:./mlruns
+          MOCK_ACCURACY: ${{ github.event.inputs.mock_accuracy }}
+        run: |
+          python train.py
 
-          tracking_uri = os.environ.get("MLFLOW_TRACKING_URI")
-          if not tracking_uri:
-              raise SystemExit("MLFLOW_TRACKING_URI is not set")
-
-          mlflow.set_tracking_uri(tracking_uri)
-          experiment_id = os.environ.get("MLFLOW_EXPERIMENT_ID", "0")
-          runs = mlflow.search_runs(
-              experiment_ids=[experiment_id],
-              order_by=["attributes.start_time DESC"],
-              max_results=1,
-          )
-          if runs.empty:
-              raise SystemExit("No MLflow runs found to export")
-
-          run_id = runs.iloc[0]["run_id"]
-          with open("model_info.txt", "w", encoding="utf-8") as f:
-              f.write(str(run_id).strip())
-          print(f"Saved run_id to model_info.txt: {run_id}")
-          PY
-
-      - name: Upload model info artifact
+      - name: Upload Artifacts
         uses: actions/upload-artifact@v4
         with:
           name: model-info
-          path: model_info.txt
-          if-no-files-found: error
-
-      - name: Upload MLflow runs artifact
-        uses: actions/upload-artifact@v4
-        with:
-          name: mlruns-data
-          path: mlruns
-          if-no-files-found: error
+          path: |
+            model_info.txt
+            mlruns/
 
   deploy:
     runs-on: ubuntu-latest
     needs: validate
-    env:
-      MLFLOW_TRACKING_URI: file:./mlruns
-      ACCURACY_THRESHOLD: "0.85"
 
     steps:
-      - name: Checkout repository
+      - name: Checkout Repository
         uses: actions/checkout@v4
 
-      - name: Set up Python
-        uses: actions/setup-python@v5
+      - name: Set up Python 3.10
+        uses: actions/setup-python@v4
         with:
-          python-version: "3.10"
+          python-version: '3.10'
 
-      - name: Install dependencies
+      - name: Install Dependencies
         run: |
           python -m pip install --upgrade pip
-          pip install mlflow
+          pip install -r requirements.txt
 
-      - name: Download model info artifact
+      - name: Download model-info artifact
         uses: actions/download-artifact@v4
         with:
           name: model-info
-          path: .
-
-      - name: Download MLflow runs artifact
-        uses: actions/download-artifact@v4
-        with:
-          name: mlruns-data
-          path: .
 
       - name: Check Accuracy Threshold
-        run: python check_threshold.py
+        env:
+          MLFLOW_TRACKING_URI: file:./mlruns
+          ACCURACY_THRESHOLD: "0.85"
+        run: |
+          python check_threshold.py
 
-      - name: Mock Docker build
+      - name: Mock Docker Build
         run: |
           echo "Building Docker image for Run ID: $(cat model_info.txt)"
+          docker build --build-arg RUN_ID=$(cat model_info.txt) -t ml-model:$(cat model_info.txt) .
+          echo "Docker image built successfully!"

@@ -39,7 +39,7 @@ jobs:
 
       - name: Train model
         env:
-          MOCK_ACCURACY: ${{ github.event.inputs.mock_accuracy }}
+          MOCK_ACCURACY: ${{ github.event.inputs.mock_accuracy || '0.70' }}
         run: python train.py
 
       - name: Export current MLflow Run ID

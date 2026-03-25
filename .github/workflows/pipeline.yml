@@ -39,13 +39,19 @@ jobs:
         run: |
           python train.py
 
-      - name: Upload Artifacts
+      - name: Upload model_info artifact
         uses: actions/upload-artifact@v4
         with:
           name: model-info
-          path: |
-            model_info.txt
-            mlruns/
+          path: model_info.txt
+          if-no-files-found: error
+
+      - name: Upload mlruns artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: mlruns-data
+          path: mlruns/
+          if-no-files-found: error
 
   deploy:
     runs-on: ubuntu-latest
@@ -69,6 +75,13 @@ jobs:
         uses: actions/download-artifact@v4
         with:
           name: model-info
+          path: .
+
+      - name: Download mlruns artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: mlruns-data
+          path: .
 
       - name: Check Accuracy Threshold
         env:

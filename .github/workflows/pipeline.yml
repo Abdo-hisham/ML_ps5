@@ -120,7 +120,7 @@ jobs:
         uses: actions/download-artifact@v4
         with:
           name: mlruns-data
-          path: mlruns
+          path: .
 
       - name: Check model threshold
         run: python check_threshold.py

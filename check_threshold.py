@@ -18,19 +18,46 @@ def _tracking_path_from_uri(tracking_uri: str) -> Path:
 
 def _read_accuracy_from_mlruns(run_id: str, tracking_uri: str) -> Optional[float]:
     tracking_path = _tracking_path_from_uri(tracking_uri)
-    if not tracking_path.exists():
-        return None
+    candidate_roots = [
+        tracking_path,
+        Path.cwd(),
+        Path.cwd() / "mlruns",
+    ]
 
-    for metrics_file in tracking_path.glob(f"*/{run_id}/metrics/accuracy"):
-        try:
-            lines = [ln.strip() for ln in metrics_file.read_text(encoding="utf-8").splitlines() if ln.strip()]
-            if not lines:
-                continue
-            parts = lines[-1].split()
-            if len(parts) >= 2:
-                return float(parts[1])
-        except Exception:
+    seen = set()
+    for root in candidate_roots:
+        root = root.resolve()
+        if root in seen or not root.exists():
             continue
+        seen.add(root)
+
+        # Direct mlruns shape: <root>/<experiment_id>/<run_id>/metrics/accuracy
+        for metrics_file in root.glob(f"*/{run_id}/metrics/accuracy"):
+            try:
+                lines = [ln.strip() for ln in metrics_file.read_text(encoding="utf-8").splitlines() if ln.strip()]
+                if not lines:
+                    continue
+                parts = lines[-1].split()
+                if len(parts) >= 2:
+                    return float(parts[1])
+            except Exception:
+                continue
+
+        # Fallback for unexpected artifact extraction paths.
+        for metrics_file in root.rglob("accuracy"):
+            try:
+                if metrics_file.parent.name != "metrics":
+                    continue
+                if metrics_file.parent.parent.name != run_id:
+                    continue
+                lines = [ln.strip() for ln in metrics_file.read_text(encoding="utf-8").splitlines() if ln.strip()]
+                if not lines:
+                    continue
+                parts = lines[-1].split()
+                if len(parts) >= 2:
+                    return float(parts[1])
+            except Exception:
+                continue
 
     return None
 
@@ -60,6 +87,9 @@ def main() -> int:
         accuracy = run.data.metrics.get("accuracy")
     except Exception:
         # Fallback for artifact-restored file store when API lookup is flaky.
+        accuracy = _read_accuracy_from_mlruns(run_id, tracking_uri)
+
+    if accuracy is None:
         accuracy = _read_accuracy_from_mlruns(run_id, tracking_uri)
 
     if accuracy is None:

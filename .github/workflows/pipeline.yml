@@ -122,7 +122,7 @@ jobs:
           name: mlruns-data
           path: .
 
-      - name: Check model threshold
+      - name: Check Accuracy Threshold
         run: python check_threshold.py
 
       - name: Mock Docker build
